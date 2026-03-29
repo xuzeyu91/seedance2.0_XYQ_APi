@@ -15,6 +15,7 @@ import json
 import time
 import uuid
 import os
+import sys
 import mimetypes
 import base64
 import re
@@ -37,6 +38,7 @@ PAGE_LOAD_TIMEOUT = 30
 API_TIMEOUT = 60
 UPLOAD_TIMEOUT = 120
 DOWNLOAD_TIMEOUT = 600
+VIDEO_TIMEOUT_ERROR_MESSAGE = f'Video generation timed out after {POLL_INTERVAL * POLL_MAX_ROUNDS // 60} minutes'
 
 MODELS = {
     'fast': 'seedance2.0_fast_direct',
@@ -52,6 +54,34 @@ MODEL_CREDITS_PER_SEC = {
     'fast': 5,
     '2.0': 8,
 }
+
+
+def configure_runtime_encoding():
+    os.environ.setdefault('PYTHONUTF8', '1')
+    os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
+
+    for stream_name in ('stdin', 'stdout', 'stderr'):
+        stream = getattr(sys, stream_name, None)
+        if stream and hasattr(stream, 'reconfigure'):
+            try:
+                stream.reconfigure(encoding='utf-8', errors='replace')
+            except ValueError:
+                pass
+
+    if os.name != 'nt':
+        return
+
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetConsoleCP(65001)
+        kernel32.SetConsoleOutputCP(65001)
+    except Exception:
+        pass
+
+
+configure_runtime_encoding()
 
 def log(msg):
     t = time.strftime('%H:%M:%S')
@@ -551,6 +581,7 @@ async def run(args):
 
     for idx, cookies_file in enumerate(cookies_files):
         cookies_path = os.path.join(DEFAULT_COOKIES_DIR, cookies_file) if not os.path.dirname(cookies_file) else cookies_file
+        attempt_started_at = time.monotonic()
         result = await run_with_cookie(
             prompt=args.prompt,
             duration=args.duration,
@@ -565,6 +596,9 @@ async def run(args):
         if result == 'INSUFFICIENT_CREDITS':
             log(f'[*] Cookie #{idx + 1} 积分不足，尝试下一个...')
             continue
+        elif not result and time.monotonic() - attempt_started_at >= POLL_INTERVAL * POLL_MAX_ROUNDS:
+            log(f'[ERROR] {VIDEO_TIMEOUT_ERROR_MESSAGE}')
+            return VIDEO_TIMEOUT_ERROR_MESSAGE
         elif result:
             return result
         else:

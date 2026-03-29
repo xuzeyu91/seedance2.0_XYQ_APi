@@ -34,10 +34,16 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 
 def configure_runtime_encoding():
-    if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
-        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    os.environ.setdefault('PYTHONUTF8', '1')
+    os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
+
+    for stream_name in ('stdin', 'stdout', 'stderr'):
+        stream = getattr(sys, stream_name, None)
+        if stream and hasattr(stream, 'reconfigure'):
+            try:
+                stream.reconfigure(encoding='utf-8', errors='replace')
+            except ValueError:
+                pass
 
     if os.name != 'nt':
         return
@@ -59,6 +65,7 @@ from xiaoyunque import (
     load_cookies,
     get_cookies_files,
     MODEL_CREDITS_PER_SEC,
+    VIDEO_TIMEOUT_ERROR_MESSAGE,
     normalize_cookie_payload,
 )
 
@@ -245,6 +252,24 @@ def openai_error_response(message: str, status_code: int = 400, param: str = Non
             'code': code,
         }
     }), status_code
+
+
+def build_openai_task_error(task: 'Task'):
+    if not task.error_message:
+        return None
+
+    if task.error_message == VIDEO_TIMEOUT_ERROR_MESSAGE:
+        return {
+            'message': task.error_message,
+            'type': 'timeout_error',
+            'code': 'video_generation_timeout',
+        }
+
+    return {
+        'message': task.error_message,
+        'type': 'video_generation_error',
+        'code': 'video_generation_failed',
+    }
 
 class Task:
     def __init__(self, task_id: str, prompt: str, duration: int, ratio: str,
@@ -542,12 +567,9 @@ def build_openai_video_object(task: Task):
             if task.completed_at:
                 result['expires_at'] = to_unix_timestamp(task.completed_at + timedelta(days=7))
 
-        if task.status == TaskStatus.FAILED and task.error_message:
-            result['error'] = {
-                'message': task.error_message,
-                'type': 'video_generation_error',
-                'code': 'video_generation_failed',
-            }
+        task_error = build_openai_task_error(task)
+        if task.status == TaskStatus.FAILED and task_error:
+            result['error'] = task_error
 
         return result
 
