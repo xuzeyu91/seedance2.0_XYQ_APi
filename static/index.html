@@ -32,7 +32,8 @@
         /* Header */
         header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 24px; border-bottom: 1px solid var(--border-color); margin-bottom: 32px; }
         header h1 { font-size: 24px; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 10px; }
-        .header-right { display: flex; gap: 12px; align-items: center; }
+        .header-right { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+        .admin-badge { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; background: #111827; color: #fff; font-size: 13px; font-weight: 500; box-shadow: var(--shadow-sm); }
         
         /* Debug Badge & Toggle */
         .debug-toggle { display: flex; align-items: center; gap: 10px; background: var(--secondary); padding: 6px 16px; border-radius: 24px; border: 1px solid var(--border-color); box-shadow: var(--shadow-sm); }
@@ -169,6 +170,7 @@
                 <h1>🎬 小云雀 - 视频生成管理</h1>
             </div>
             <div class="header-right">
+                <div class="admin-badge">管理员：<span id="admin-username">-</span></div>
                 <div class="debug-toggle">
                     <span class="debug-label">调试模式</span>
                     <label class="toggle-switch">
@@ -179,6 +181,8 @@
                 </div>
                 <button class="btn btn-secondary" onclick="checkHealth()">检查服务</button>
                 <button class="btn btn-secondary" onclick="loadStats()">刷新</button>
+                <button class="btn btn-secondary" onclick="openAccountModal()">账号设置</button>
+                <button class="btn btn-secondary" onclick="logout()">退出登录</button>
             </div>
         </header>
 
@@ -364,6 +368,44 @@
         </div>
     </div>
 
+    <div class="modal" id="account-modal">
+        <div class="modal-content" style="max-width: 520px;">
+            <div class="modal-header">
+                <h2>管理员账号设置</h2>
+                <button class="modal-close" onclick="closeAccountModal()">&times;</button>
+            </div>
+            <div class="form-group">
+                <label>当前账号</label>
+                <input id="account-current-username" type="text" readonly>
+            </div>
+            <div class="form-group" style="margin-top: 16px;">
+                <label>新账号</label>
+                <input id="account-new-username" type="text" placeholder="请输入新的管理员账号">
+            </div>
+            <div class="form-group" style="margin-top: 16px;">
+                <label>当前密码</label>
+                <input id="account-current-password" type="password" placeholder="修改前需要验证当前密码">
+            </div>
+            <div class="form-group" style="margin-top: 16px;">
+                <label>新密码</label>
+                <input id="account-new-password" type="password" placeholder="不修改密码可留空">
+            </div>
+            <div class="form-group" style="margin-top: 16px;">
+                <label>确认新密码</label>
+                <input id="account-confirm-password" type="password" placeholder="再次输入新密码">
+            </div>
+            <div class="form-group" style="margin-top: 16px;">
+                <label>API Key（Bearer Token）</label>
+                <input id="account-api-key" type="text" placeholder="调用 /v1/* 时使用的 Bearer Token">
+                <div style="font-size: 12px; color: var(--text-muted);">调用接口时请在请求头中带上 `Authorization: Bearer 你的API Key`</div>
+            </div>
+            <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
+                <button class="btn btn-secondary" onclick="closeAccountModal()">取消</button>
+                <button class="btn btn-primary" id="account-save-btn" onclick="submitAccountSettings()">保存修改</button>
+            </div>
+        </div>
+    </div>
+
     <div class="toast" id="toast"></div>
 
     <script>
@@ -371,6 +413,31 @@
         let selectedFiles = [];
         let selectedCookieFile = null;
         let BASE_DIR = '';
+        let currentApiKey = '';
+
+        async function loadAuthStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/auth/status`);
+                const result = await response.json();
+                if (!result.authenticated) {
+                    window.location.href = '/login';
+                    return;
+                }
+
+                const username = result.username || 'admin';
+                document.getElementById('admin-username').textContent = username;
+                document.getElementById('account-current-username').value = username;
+                currentApiKey = result.api_key || '';
+                document.getElementById('account-api-key').value = currentApiKey;
+
+                const newUsernameInput = document.getElementById('account-new-username');
+                if (!newUsernameInput.value) {
+                    newUsernameInput.value = username;
+                }
+            } catch (error) {
+                console.error('加载管理员状态失败', error);
+            }
+        }
 
         async function checkDebugMode() {
             try {
@@ -730,6 +797,93 @@
             document.getElementById('debug-info-modal').classList.remove('show');
         }
 
+        function openAccountModal() {
+            const currentUsername = document.getElementById('admin-username').textContent || 'admin';
+            document.getElementById('account-current-username').value = currentUsername;
+            document.getElementById('account-new-username').value = currentUsername;
+            document.getElementById('account-current-password').value = '';
+            document.getElementById('account-new-password').value = '';
+            document.getElementById('account-confirm-password').value = '';
+            document.getElementById('account-api-key').value = currentApiKey;
+            document.getElementById('account-modal').classList.add('show');
+        }
+
+        function closeAccountModal() {
+            document.getElementById('account-modal').classList.remove('show');
+        }
+
+        async function submitAccountSettings() {
+            const currentPassword = document.getElementById('account-current-password').value;
+            const newUsername = document.getElementById('account-new-username').value.trim();
+            const newPassword = document.getElementById('account-new-password').value;
+            const confirmPassword = document.getElementById('account-confirm-password').value;
+            const apiKey = document.getElementById('account-api-key').value.trim();
+            const saveBtn = document.getElementById('account-save-btn');
+            const currentUsername = document.getElementById('account-current-username').value;
+
+            if (!currentPassword) {
+                showToast('请输入当前密码', 'error');
+                return;
+            }
+
+            if (newPassword && newPassword !== confirmPassword) {
+                showToast('两次输入的新密码不一致', 'error');
+                return;
+            }
+
+            if (!apiKey) {
+                showToast('API Key 不能为空', 'error');
+                return;
+            }
+
+            if (!newPassword && newUsername === currentUsername && apiKey === currentApiKey) {
+                showToast('请至少修改账号、密码或 API Key 其中一项', 'error');
+                return;
+            }
+
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<span class="loading"></span> 保存中...';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/auth/change-credentials`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        current_password: currentPassword,
+                        new_username: newUsername,
+                        new_password: newPassword,
+                        new_api_key: apiKey
+                    })
+                });
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    showToast(result.message, 'success');
+                    document.getElementById('admin-username').textContent = result.username;
+                    currentApiKey = result.api_key || apiKey;
+                    closeAccountModal();
+                    await loadAuthStatus();
+                } else {
+                    showToast(result.message || '保存失败', 'error');
+                }
+            } catch (error) {
+                showToast('网络错误', 'error');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = '保存修改';
+            }
+        }
+
+        async function logout() {
+            try {
+                await fetch(`${API_BASE}/api/auth/logout`, { method: 'POST' });
+            } catch (error) {
+                console.error('退出登录失败', error);
+            } finally {
+                window.location.href = '/login';
+            }
+        }
+
         async function submitPastedCookie() {
             const name = document.getElementById('cookie-name-input').value.trim() || 'cookie_' + Date.now();
             const content = document.getElementById('cookie-paste-area').value.trim();
@@ -899,6 +1053,7 @@
         }, 5000);
 
         updateRequiredCredits();
+        loadAuthStatus();
         loadStats();
         checkDebugMode();
     </script>

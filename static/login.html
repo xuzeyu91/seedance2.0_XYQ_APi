@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理员登录 - 小云雀</title>
+    <style>
+        :root {
+            --bg: #f4efe8;
+            --panel: rgba(255, 252, 247, 0.92);
+            --panel-border: rgba(31, 41, 55, 0.08);
+            --text: #111827;
+            --muted: #6b7280;
+            --accent: #0f172a;
+            --accent-hover: #1e293b;
+            --error: #b91c1c;
+            --shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            font-family: "Noto Sans SC", "Segoe UI", sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at top left, rgba(245, 158, 11, 0.18), transparent 32%),
+                radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.14), transparent 28%),
+                linear-gradient(135deg, #f8f5ef 0%, #efe7db 45%, #f7f2eb 100%);
+        }
+
+        .shell {
+            width: min(960px, 100%);
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            border: 1px solid var(--panel-border);
+            border-radius: 28px;
+            overflow: hidden;
+            background: rgba(255, 255, 255, 0.4);
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(14px);
+        }
+
+        .hero {
+            padding: 56px 48px;
+            background:
+                linear-gradient(155deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.88)),
+                linear-gradient(135deg, #0f172a, #334155);
+            color: #f8fafc;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 28px;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            width: fit-content;
+            padding: 8px 14px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.08);
+            color: rgba(248, 250, 252, 0.9);
+            font-size: 13px;
+            letter-spacing: 0.06em;
+        }
+
+        .hero h1 {
+            font-size: clamp(34px, 5vw, 52px);
+            line-height: 1.05;
+            margin: 18px 0 14px;
+            font-weight: 700;
+        }
+
+        .hero p {
+            color: rgba(226, 232, 240, 0.82);
+            font-size: 15px;
+            line-height: 1.8;
+            max-width: 34ch;
+        }
+
+        .credential-box {
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
+            padding: 20px;
+        }
+
+        .credential-box strong {
+            display: block;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        .credential-box code {
+            display: inline-block;
+            margin-top: 6px;
+            padding: 6px 10px;
+            border-radius: 10px;
+            background: rgba(15, 23, 42, 0.38);
+            font-size: 14px;
+        }
+
+        .panel {
+            background: var(--panel);
+            padding: 48px 40px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .panel h2 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .panel p {
+            color: var(--muted);
+            line-height: 1.7;
+            margin-bottom: 28px;
+            font-size: 14px;
+        }
+
+        form {
+            display: grid;
+            gap: 16px;
+        }
+
+        label {
+            display: grid;
+            gap: 8px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        input {
+            width: 100%;
+            border: 1px solid rgba(148, 163, 184, 0.4);
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 16px;
+            padding: 14px 16px;
+            font-size: 15px;
+            color: var(--text);
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: rgba(15, 23, 42, 0.72);
+            box-shadow: 0 0 0 4px rgba(15, 23, 42, 0.08);
+        }
+
+        button {
+            margin-top: 8px;
+            border: none;
+            border-radius: 16px;
+            padding: 14px 18px;
+            background: var(--accent);
+            color: white;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.18s ease, background 0.18s ease, opacity 0.18s ease;
+        }
+
+        button:hover {
+            background: var(--accent-hover);
+            transform: translateY(-1px);
+        }
+
+        button:disabled {
+            opacity: 0.65;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .message {
+            min-height: 22px;
+            color: var(--error);
+            font-size: 13px;
+        }
+
+        .hint {
+            margin-top: 18px;
+            padding-top: 18px;
+            border-top: 1px solid rgba(148, 163, 184, 0.2);
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.7;
+        }
+
+        @media (max-width: 860px) {
+            .shell {
+                grid-template-columns: 1fr;
+            }
+
+            .hero,
+            .panel {
+                padding: 32px 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="shell">
+        <section class="hero">
+            <div>
+                <div class="eyebrow">Admin Access</div>
+                <h1>小云雀后台管理</h1>
+                <p>访问系统前需要先通过管理员认证。首次进入可使用默认账号密码登录，进入系统后可在右上角修改账号、密码和 API Key。</p>
+            </div>
+            <div class="credential-box">
+                <strong>默认管理员账户</strong>
+                <div>账号：<code>admin</code></div>
+                <div>密码：<code>admin</code></div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>管理员登录</h2>
+            <p>账号密码和 `/v1/*` 接口使用的 Bearer Token 都保存在 SQLite 数据库中，服务重启后仍然有效。</p>
+            <form id="login-form">
+                <label>
+                    管理员账号
+                    <input id="username" name="username" type="text" autocomplete="username" value="admin" required>
+                </label>
+                <label>
+                    管理员密码
+                    <input id="password" name="password" type="password" autocomplete="current-password" value="admin" required>
+                </label>
+                <button id="submit-btn" type="submit">进入系统</button>
+                <div id="message" class="message"></div>
+            </form>
+            <div class="hint">页面访问使用管理员登录态；调用 `/v1/*` 接口时请在请求头中带上 `Authorization: Bearer 你的API Key`。API Key 可在登录后进入“账号设置”查看和修改。</div>
+        </section>
+    </main>
+
+    <script>
+        const form = document.getElementById('login-form');
+        const submitBtn = document.getElementById('submit-btn');
+        const message = document.getElementById('message');
+
+        async function checkLoggedIn() {
+            try {
+                const response = await fetch('/api/auth/status');
+                const result = await response.json();
+                if (result.authenticated) {
+                    window.location.replace('/');
+                }
+            } catch (error) {
+                console.error('Failed to check auth status:', error);
+            }
+        }
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            message.textContent = '';
+            submitBtn.disabled = true;
+            submitBtn.textContent = '登录中...';
+
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: document.getElementById('username').value.trim(),
+                        password: document.getElementById('password').value
+                    })
+                });
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    window.location.replace('/');
+                    return;
+                }
+
+                message.textContent = result.message || '登录失败';
+            } catch (error) {
+                message.textContent = '无法连接到服务，请稍后再试';
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = '进入系统';
+            }
+        });
+
+        checkLoggedIn();
+    </script>
+</body>
+</html>

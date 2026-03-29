@@ -26,7 +26,8 @@ from datetime import datetime, timedelta
 from enum import Enum
 from math import gcd
 from concurrent.futures import ThreadPoolExecutor, Future
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, session, redirect, url_for
+from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -63,6 +64,10 @@ from xiaoyunque import (
 
 app = Flask(__name__, static_folder='static', static_url_path='')
 app.json.ensure_ascii = False
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or f'xiaoyunque-{uuid.uuid4().hex}'
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=12)
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 @app.after_request
 def after_request(response):
@@ -85,6 +90,16 @@ UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(COOKIES_DIR, exist_ok=True)
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+AUTH_SESSION_KEY = 'admin_authenticated'
+AUTH_USERNAME_SESSION_KEY = 'admin_username'
+DEFAULT_ADMIN_API_KEY = os.environ.get('DEFAULT_ADMIN_API_KEY', 'xiaoyunque-api-key')
+PUBLIC_PATHS = {
+    '/login',
+    '/api/auth/login',
+    '/api/auth/status',
+    '/api/health',
+}
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'}
 MAX_CONTENT_LENGTH = 50 * 1024 * 1024
@@ -304,8 +319,43 @@ class Task:
             return result
 
 
-def init_database():
+def get_db_connection(row_factory: bool = False):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    if row_factory:
+        conn.row_factory = sqlite3.Row
+    return conn
+
+
+def ensure_default_admin(cursor):
+    cursor.execute("SELECT COUNT(*) FROM admin_users")
+    admin_count = cursor.fetchone()[0]
+    if admin_count > 0:
+        cursor.execute('''
+            SELECT username
+            FROM admin_users
+            WHERE api_key IS NULL OR TRIM(api_key) = ''
+            ORDER BY created_at ASC, username ASC
+            LIMIT 1
+        ''')
+        row = cursor.fetchone()
+        if row:
+            now = datetime.now().isoformat()
+            cursor.execute('''
+                UPDATE admin_users
+                SET api_key = ?, updated_at = ?
+                WHERE username = ?
+            ''', (DEFAULT_ADMIN_API_KEY, now, row[0]))
+        return
+
+    now = datetime.now().isoformat()
+    cursor.execute('''
+        INSERT INTO admin_users (username, password_hash, api_key, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+    ''', ('admin', generate_password_hash('admin'), DEFAULT_ADMIN_API_KEY, now, now))
+
+
+def init_database():
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS tasks (
@@ -346,14 +396,155 @@ def init_database():
             created_at TEXT
         )
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS admin_users (
+            username TEXT PRIMARY KEY,
+            password_hash TEXT NOT NULL,
+            api_key TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )
+    ''')
+    cursor.execute("PRAGMA table_info(admin_users)")
+    admin_columns = {row[1] for row in cursor.fetchall()}
+    if 'api_key' not in admin_columns:
+        cursor.execute("ALTER TABLE admin_users ADD COLUMN api_key TEXT")
+    cursor.execute('''
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_api_key
+        ON admin_users(api_key)
+    ''')
     cursor.execute("PRAGMA table_info(tasks)")
     existing_columns = {row[1] for row in cursor.fetchall()}
     if 'size' not in existing_columns:
         cursor.execute("ALTER TABLE tasks ADD COLUMN size TEXT")
     if 'quality' not in existing_columns:
         cursor.execute("ALTER TABLE tasks ADD COLUMN quality TEXT DEFAULT 'standard'")
+    ensure_default_admin(cursor)
     conn.commit()
     conn.close()
+
+
+def get_admin_user(username: str):
+    if not username:
+        return None
+
+    conn = get_db_connection(row_factory=True)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT username, password_hash, api_key, created_at, updated_at
+        FROM admin_users
+        WHERE username = ?
+    ''', (username,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_admin_by_api_key(api_key: str):
+    if not api_key:
+        return None
+
+    conn = get_db_connection(row_factory=True)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT username, password_hash, api_key, created_at, updated_at
+        FROM admin_users
+        WHERE api_key = ?
+    ''', (api_key,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def is_admin_authenticated() -> bool:
+    return bool(session.get(AUTH_SESSION_KEY) and session.get(AUTH_USERNAME_SESSION_KEY))
+
+
+def get_current_admin_username():
+    if not is_admin_authenticated():
+        return None
+    return session.get(AUTH_USERNAME_SESSION_KEY)
+
+
+def login_admin(username: str):
+    session.permanent = True
+    session[AUTH_SESSION_KEY] = True
+    session[AUTH_USERNAME_SESSION_KEY] = username
+
+
+def logout_admin():
+    session.pop(AUTH_SESSION_KEY, None)
+    session.pop(AUTH_USERNAME_SESSION_KEY, None)
+
+
+def get_request_bearer_token():
+    authorization = request.headers.get('Authorization', '')
+    if not authorization:
+        return None
+
+    parts = authorization.strip().split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != 'bearer':
+        return None
+    return parts[1].strip() or None
+
+
+def update_admin_credentials(current_username: str, current_password: str,
+                             new_username: str = None, new_password: str = None,
+                             new_api_key: str = None):
+    current_username = str(current_username or '').strip()
+    new_username = str(new_username or '').strip()
+    new_password = str(new_password or '')
+    new_api_key = str(new_api_key or '').strip()
+    current_password = str(current_password or '')
+
+    if not current_username:
+        raise APIError('当前登录用户无效', status_code=401, code='unauthorized')
+    if not current_password:
+        raise APIError('请输入当前密码', param='current_password')
+
+    admin = get_admin_user(current_username)
+    if not admin or not check_password_hash(admin['password_hash'], current_password):
+        raise APIError('当前密码错误', status_code=403, param='current_password', code='invalid_password')
+
+    target_username = new_username or current_username
+    target_api_key = new_api_key or admin.get('api_key') or DEFAULT_ADMIN_API_KEY
+    if len(target_username) < 3:
+        raise APIError('用户名至少需要 3 个字符', param='new_username')
+    if len(target_api_key) < 8:
+        raise APIError('API Key 至少需要 8 个字符', param='new_api_key')
+    if (not new_password and target_username == current_username
+            and target_api_key == (admin.get('api_key') or DEFAULT_ADMIN_API_KEY)):
+        raise APIError('请至少修改用户名、密码或 API Key 其中一项')
+    if new_password and len(new_password) < 4:
+        raise APIError('新密码至少需要 4 个字符', param='new_password')
+
+    existing_user = get_admin_user(target_username)
+    if existing_user and target_username != current_username:
+        raise APIError('该用户名已存在', status_code=409, param='new_username', code='username_exists')
+    existing_api_key_owner = get_admin_by_api_key(target_api_key)
+    if existing_api_key_owner and existing_api_key_owner['username'] != current_username:
+        raise APIError('该 API Key 已被使用', status_code=409, param='new_api_key', code='api_key_exists')
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.now().isoformat()
+    cursor.execute('''
+        UPDATE admin_users
+        SET username = ?, password_hash = ?, api_key = ?, updated_at = ?
+        WHERE username = ?
+    ''', (
+        target_username,
+        generate_password_hash(new_password) if new_password else admin['password_hash'],
+        target_api_key,
+        now,
+        current_username,
+    ))
+    conn.commit()
+    conn.close()
+    return {
+        'username': target_username,
+        'api_key': target_api_key,
+    }
 
 
 def build_openai_video_object(task: Task):
@@ -891,6 +1082,111 @@ def get_task_video_file(task: Task):
         raise APIError('视频文件不存在', status_code=404, code='video_not_found')
 
     return video_path
+
+
+@app.before_request
+def require_admin_login():
+    if request.method == 'OPTIONS':
+        return None
+
+    path = request.path or '/'
+
+    if path == '/login' and is_admin_authenticated():
+        return redirect(url_for('index'))
+
+    if path in PUBLIC_PATHS:
+        return None
+
+    if path.startswith('/v1/'):
+        api_key = get_request_bearer_token()
+        if api_key and get_admin_by_api_key(api_key):
+            return None
+        return openai_error_response(
+            'Invalid or missing Bearer token',
+            status_code=401,
+            code='authentication_required',
+            error_type='authentication_error',
+        )
+
+    if is_admin_authenticated():
+        return None
+
+    if path.startswith('/api/'):
+        return jsonify({'status': 'error', 'message': '请先登录管理员账号'}), 401
+
+    return redirect(url_for('login_page'))
+
+
+@app.route('/login')
+def login_page():
+    return send_file(os.path.join(app.static_folder, 'login.html'))
+
+
+@app.route('/api/auth/status', methods=['GET'])
+def auth_status():
+    username = get_current_admin_username()
+    admin = get_admin_user(username) if username else None
+    return jsonify({
+        'status': 'success',
+        'authenticated': is_admin_authenticated(),
+        'username': username,
+        'api_key': admin.get('api_key') if admin else None,
+    })
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    data = request.get_json(silent=True) or request.form or {}
+    username = str(data.get('username', '')).strip()
+    password = str(data.get('password', ''))
+
+    if not username or not password:
+        return jsonify({'status': 'error', 'message': '请输入账号和密码'}), 400
+
+    admin = get_admin_user(username)
+    if not admin or not check_password_hash(admin['password_hash'], password):
+        return jsonify({'status': 'error', 'message': '账号或密码错误'}), 401
+
+    login_admin(username)
+    return jsonify({
+        'status': 'success',
+        'message': '登录成功',
+        'username': username,
+    })
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def auth_logout():
+    logout_admin()
+    return jsonify({'status': 'success', 'message': '已退出登录'})
+
+
+@app.route('/api/auth/change-credentials', methods=['POST'])
+def change_admin_credentials():
+    try:
+        data = request.get_json(silent=True) or {}
+        current_password = data.get('current_password')
+        new_username = data.get('new_username')
+        new_password = data.get('new_password')
+        new_api_key = data.get('new_api_key')
+        updated_credentials = update_admin_credentials(
+            current_username=get_current_admin_username(),
+            current_password=current_password,
+            new_username=new_username,
+            new_password=new_password,
+            new_api_key=new_api_key,
+        )
+        login_admin(updated_credentials['username'])
+        return jsonify({
+            'status': 'success',
+            'message': '管理员账号信息已更新',
+            'username': updated_credentials['username'],
+            'api_key': updated_credentials['api_key'],
+        })
+    except APIError as e:
+        return jsonify({'status': 'error', 'message': e.message}), e.status_code
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 @app.route('/')
