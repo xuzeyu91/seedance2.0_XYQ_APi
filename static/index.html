@@ -414,18 +414,46 @@
         let selectedCookieFile = null;
         let BASE_DIR = '';
         let currentApiKey = '';
+        let refreshTimer = null;
+        let redirectingToLogin = false;
+
+        function handleUnauthorized(message = '登录已失效，请重新登录') {
+            if (redirectingToLogin) {
+                return;
+            }
+
+            redirectingToLogin = true;
+            if (refreshTimer) {
+                clearInterval(refreshTimer);
+                refreshTimer = null;
+            }
+
+            showToast(message, 'error');
+            setTimeout(() => {
+                window.location.href = '/login';
+            }, 150);
+        }
+
+        async function apiFetch(url, options = {}) {
+            const response = await fetch(url, options);
+            if (response.status === 401) {
+                handleUnauthorized();
+                throw new Error('UNAUTHORIZED');
+            }
+            return response;
+        }
 
         async function loadAuthStatus() {
             try {
                 const response = await fetch(`${API_BASE}/api/auth/status`);
                 if (!response.ok) {
-                    window.location.href = '/login';
-                    return;
+                    handleUnauthorized('请先登录管理员账号');
+                    return false;
                 }
                 const result = await response.json();
                 if (!result.authenticated) {
-                    window.location.href = '/login';
-                    return;
+                    handleUnauthorized('请先登录管理员账号');
+                    return false;
                 }
 
                 const username = result.username || 'admin';
@@ -438,27 +466,34 @@
                 if (!newUsernameInput.value) {
                     newUsernameInput.value = username;
                 }
+                return true;
             } catch (error) {
                 console.error('加载管理员状态失败', error);
-                window.location.href = '/login';
+                if (String(error && error.message) !== 'UNAUTHORIZED') {
+                    handleUnauthorized('请先登录管理员账号');
+                }
+                return false;
             }
         }
 
         async function checkDebugMode() {
             try {
-                const response = await fetch(`${API_BASE}/api/debug-mode`);
+                const response = await apiFetch(`${API_BASE}/api/debug-mode`);
                 const result = await response.json();
                 if (result.status === 'success') {
                     document.getElementById('debug-toggle').checked = result.debug_mode;
                 }
             } catch (e) {
+                if (String(e && e.message) === 'UNAUTHORIZED') {
+                    return;
+                }
                 console.error('检查调试模式失败', e);
             }
         }
 
         async function toggleDebugMode(enabled) {
             try {
-                const response = await fetch(`${API_BASE}/api/debug-mode`, {
+                const response = await apiFetch(`${API_BASE}/api/debug-mode`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ enabled })
@@ -471,6 +506,9 @@
                     document.getElementById('debug-toggle').checked = !enabled;
                 }
             } catch (e) {
+                if (String(e && e.message) === 'UNAUTHORIZED') {
+                    return;
+                }
                 console.error('切换调试模式失败', e);
                 showToast('切换调试模式失败', 'error');
                 document.getElementById('debug-toggle').checked = !enabled;
@@ -564,7 +602,7 @@
                     formData.append('files', file);
                 });
 
-                const response = await fetch(`${API_BASE}/api/generate-video`, {
+                const response = await apiFetch(`${API_BASE}/api/generate-video`, {
                     method: 'POST',
                     body: formData
                 });
@@ -592,7 +630,7 @@
 
         async function loadStats() {
             try {
-                const response = await fetch(`${API_BASE}/api/stats`);
+                const response = await apiFetch(`${API_BASE}/api/stats`);
                 const result = await response.json();
                 if (result.status === 'success') {
                     document.getElementById('stat-pending').textContent = result.stats.pending || 0;
@@ -612,7 +650,7 @@
 
             try {
                 const url = status ? `${API_BASE}/api/tasks?status=${status}` : `${API_BASE}/api/tasks`;
-                const response = await fetch(url);
+                const response = await apiFetch(url);
                 const result = await response.json();
 
                 if (!result.tasks || result.tasks.length === 0) {
@@ -670,7 +708,7 @@
             const list = document.getElementById('cookie-list');
 
             try {
-                const response = await fetch(`${API_BASE}/api/cookies`);
+                const response = await apiFetch(`${API_BASE}/api/cookies`);
                 const result = await response.json();
 
                 if (!result.cookies || result.cookies.length === 0) {
@@ -704,7 +742,7 @@
             btn.innerHTML = '<span class="loading"></span>';
 
             try {
-                const response = await fetch(`${API_BASE}/api/cookies/${encodeURIComponent(name)}/test`, {
+                const response = await apiFetch(`${API_BASE}/api/cookies/${encodeURIComponent(name)}/test`, {
                     method: 'POST'
                 });
                 const result = await response.json();
@@ -729,7 +767,7 @@
             btn.innerHTML = '<span class="loading"></span> 查询中...';
 
             try {
-                const response = await fetch(`${API_BASE}/api/cookies/check-all`, {
+                const response = await apiFetch(`${API_BASE}/api/cookies/check-all`, {
                     method: 'POST'
                 });
                 const result = await response.json();
@@ -765,7 +803,7 @@
             formData.append('name', name);
 
             try {
-                const response = await fetch(`${API_BASE}/api/cookies`, {
+                const response = await apiFetch(`${API_BASE}/api/cookies`, {
                     method: 'POST',
                     body: formData
                 });
@@ -850,7 +888,7 @@
             saveBtn.innerHTML = '<span class="loading"></span> 保存中...';
 
             try {
-                const response = await fetch(`${API_BASE}/api/auth/change-credentials`, {
+                const response = await apiFetch(`${API_BASE}/api/auth/change-credentials`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -881,7 +919,7 @@
 
         async function logout() {
             try {
-                await fetch(`${API_BASE}/api/auth/logout`, { method: 'POST' });
+                await apiFetch(`${API_BASE}/api/auth/logout`, { method: 'POST' });
             } catch (error) {
                 console.error('退出登录失败', error);
             } finally {
@@ -907,7 +945,7 @@
             }
 
             try {
-                const response = await fetch(`${API_BASE}/api/cookies`, {
+                const response = await apiFetch(`${API_BASE}/api/cookies`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name, content: parsedContent })
@@ -932,7 +970,7 @@
             if (!confirm(`确定要删除 Cookie "${name}" 吗？`)) return;
 
             try {
-                const response = await fetch(`${API_BASE}/api/cookies/${encodeURIComponent(name)}`, {
+                const response = await apiFetch(`${API_BASE}/api/cookies/${encodeURIComponent(name)}`, {
                     method: 'DELETE'
                 });
                 const result = await response.json();
@@ -969,7 +1007,7 @@
 
         async function retryTask(taskId) {
             try {
-                const response = await fetch(`${API_BASE}/api/task/${taskId}/retry`, { method: 'POST' });
+                const response = await apiFetch(`${API_BASE}/api/task/${taskId}/retry`, { method: 'POST' });
                 const result = await response.json();
                 if (result.status === 'success') {
                     showToast('任务已重新提交', 'success');
@@ -986,7 +1024,7 @@
         async function deleteTask(taskId) {
             if (!confirm('确定要删除这个任务吗？')) return;
             try {
-                const response = await fetch(`${API_BASE}/api/task/${taskId}`, { method: 'DELETE' });
+                const response = await apiFetch(`${API_BASE}/api/task/${taskId}`, { method: 'DELETE' });
                 const result = await response.json();
                 if (result.status === 'success') {
                     showToast('任务已删除', 'success');
@@ -1003,7 +1041,7 @@
         async function clearAllTasks() {
             if (!confirm('确定要清空所有任务吗？正在运行的任务不会被清空。')) return;
             try {
-                const response = await fetch(`${API_BASE}/api/tasks/clear`, { method: 'POST' });
+                const response = await apiFetch(`${API_BASE}/api/tasks/clear`, { method: 'POST' });
                 const result = await response.json();
                 if (result.status === 'success') {
                     showToast('已清空 ' + result.deleted + ' 个任务', 'success');
@@ -1019,7 +1057,7 @@
 
         async function checkHealth() {
             try {
-                const response = await fetch(`${API_BASE}/api/health`);
+                const response = await apiFetch(`${API_BASE}/api/health`);
                 const result = await response.json();
                 if (result.status === 'healthy') {
                     showToast(`服务正常 (v${result.version})，Cookie数: ${result.cookies_count}，运行中: ${result.running_tasks}`, 'success');
@@ -1050,17 +1088,25 @@
             return (bytes / 1024 / 1024).toFixed(1) + ' MB';
         }
 
-        setInterval(() => {
-            if (document.getElementById('panel-tasks').style.display !== 'none') {
-                loadTasks();
+        async function initializePage() {
+            updateRequiredCredits();
+            const authenticated = await loadAuthStatus();
+            if (!authenticated || redirectingToLogin) {
+                return;
             }
-            loadStats();
-        }, 5000);
 
-        updateRequiredCredits();
-        loadAuthStatus();
-        loadStats();
-        checkDebugMode();
+            await loadStats();
+            await checkDebugMode();
+
+            refreshTimer = setInterval(() => {
+                if (document.getElementById('panel-tasks').style.display !== 'none') {
+                    loadTasks();
+                }
+                loadStats();
+            }, 5000);
+        }
+
+        initializePage();
     </script>
 </body>
 </html>

@@ -95,6 +95,7 @@ AUTH_SESSION_KEY = 'admin_authenticated'
 AUTH_USERNAME_SESSION_KEY = 'admin_username'
 DEFAULT_ADMIN_API_KEY = os.environ.get('DEFAULT_ADMIN_API_KEY', 'xiaoyunque-api-key')
 PUBLIC_PATHS = {
+    '/favicon.ico',
     '/login',
     '/api/auth/login',
     '/api/auth/status',
@@ -1120,6 +1121,14 @@ def require_admin_login():
 @app.route('/login')
 def login_page():
     return send_file(os.path.join(app.static_folder, 'login.html'))
+
+
+@app.route('/favicon.ico')
+def favicon():
+    favicon_path = os.path.join(app.static_folder, 'favicon.ico')
+    if os.path.exists(favicon_path):
+        return send_file(favicon_path, mimetype='image/x-icon')
+    return '', 204
 
 
 @app.route('/api/auth/status', methods=['GET'])
