@@ -123,33 +123,6 @@ MODEL_ALIASES = {
 DEFAULT_API_MODEL = 'seedance-2.0-fast'
 PROGRESS_UPDATE_INTERVAL = 10
 PROGRESS_MAX_RUNTIME = 3600
-DEBUG_MODE = True
-SAMPLE_VIDEO_PATH = os.path.join(DATA_DIR, 'debug_sample.mp4')
-SAMPLE_VIDEO_BYTES = bytes([
-    0, 0, 0, 24, 102, 116, 121, 112,
-    109, 112, 52, 50, 0, 0, 0, 0,
-    109, 112, 52, 50, 105, 115, 111, 109,
-    0, 0, 0, 8, 102, 114, 101, 101,
-])
-DEBUG_MODE_LOCK = threading.Lock()
-
-def set_debug_mode(enabled: bool):
-    global DEBUG_MODE
-    with DEBUG_MODE_LOCK:
-        DEBUG_MODE = enabled
-    return DEBUG_MODE
-
-def get_debug_mode() -> bool:
-    with DEBUG_MODE_LOCK:
-        return DEBUG_MODE
-
-
-def ensure_debug_sample_video() -> str:
-    if not os.path.exists(SAMPLE_VIDEO_PATH):
-        os.makedirs(os.path.dirname(SAMPLE_VIDEO_PATH), exist_ok=True)
-        with open(SAMPLE_VIDEO_PATH, 'wb') as f:
-            f.write(SAMPLE_VIDEO_BYTES)
-    return SAMPLE_VIDEO_PATH
 
 PROGRESS_STAGES = [
     {'time': 0, 'progress': 5},
@@ -797,21 +770,6 @@ class TaskManager:
             )
             progress_thread.start()
 
-            if DEBUG_MODE:
-                sample_video_path = ensure_debug_sample_video()
-                print(f"[DEBUG] Debug mode enabled, returning local sample video: {sample_video_path}")
-                time.sleep(5)
-                
-                with task.lock:
-                    task.status = TaskStatus.SUCCESS
-                    task.video_path = os.path.relpath(sample_video_path, BASE_DIR)
-                    task.progress = 100
-                    task.completed_at = datetime.now()
-                    print(f"[OK] Task completed (debug mode): {task_id}")
-                
-                self._save_task_to_db(task)
-                return
-
             abs_ref_images = []
             for img_path in task.ref_images:
                 if os.path.isabs(img_path):
@@ -1213,33 +1171,7 @@ def health_check():
         'max_workers': MAX_WORKERS,
         'running_tasks': task_manager.get_running_count(),
         'cookies_count': len(cookies_files),
-        'debug_mode': get_debug_mode()
     })
-
-
-@app.route('/api/debug-mode', methods=['GET'])
-def get_debug_mode_api():
-    return jsonify({
-        'status': 'success',
-        'debug_mode': get_debug_mode()
-    })
-
-
-@app.route('/api/debug-mode', methods=['POST'])
-def set_debug_mode_api():
-    try:
-        data = request.json or {}
-        enabled = data.get('enabled')
-        if enabled is None:
-            return jsonify({'status': 'error', 'message': '缺少 enabled 参数'}), 400
-        new_mode = set_debug_mode(bool(enabled))
-        return jsonify({
-            'status': 'success',
-            'debug_mode': new_mode,
-            'message': f'调试模式已{"开启" if new_mode else "关闭"}'
-        })
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 @app.route('/api/cookies', methods=['GET'])
