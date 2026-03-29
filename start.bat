@@ -9,9 +9,17 @@ set "PYTHON_EXE=%VENV_DIR%\Scripts\python.exe"
 set "PORT=8033"
 set "HOST=0.0.0.0"
 set "BROWSER_URL=http://127.0.0.1:%PORT%"
+set "LOCAL_TEMP_DIR=%CD%\.cache\temp"
+set "PLAYWRIGHT_CACHE_DIR=%CD%\.cache\ms-playwright"
 if not defined PIP_INDEX_URL set "PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple"
 if not defined PIP_TRUSTED_HOST set "PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn"
 if not defined PLAYWRIGHT_DOWNLOAD_HOST set "PLAYWRIGHT_DOWNLOAD_HOST=https://registry.npmmirror.com/-/binary/playwright"
+
+if not exist "%LOCAL_TEMP_DIR%" mkdir "%LOCAL_TEMP_DIR%"
+if not exist "%PLAYWRIGHT_CACHE_DIR%" mkdir "%PLAYWRIGHT_CACHE_DIR%"
+set "TMP=%LOCAL_TEMP_DIR%"
+set "TEMP=%LOCAL_TEMP_DIR%"
+set "PLAYWRIGHT_BROWSERS_PATH=%PLAYWRIGHT_CACHE_DIR%"
 
 echo [1/5] 检查 Python 虚拟环境...
 if exist "%PYTHON_EXE%" goto install_deps
@@ -49,6 +57,8 @@ if errorlevel 1 goto fail
 echo [4/5] 安装 Playwright Chromium...
 echo 使用 PyPI 镜像: %PIP_INDEX_URL%
 echo 使用 Playwright 镜像: %PLAYWRIGHT_DOWNLOAD_HOST%
+echo 使用临时目录: %TEMP%
+echo 使用浏览器缓存目录: %PLAYWRIGHT_BROWSERS_PATH%
 call "%PYTHON_EXE%" -m playwright install chromium
 if errorlevel 1 goto fail
 
