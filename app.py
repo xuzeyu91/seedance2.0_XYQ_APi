@@ -1601,23 +1601,40 @@ def test_cookie(cookie_name):
         async def check_credits_async():
             cookies = load_cookies(cookie_path)
             from playwright.async_api import async_playwright
-            p = await async_playwright().start()
-            b = await p.chromium.launch(headless=True, args=['--no-sandbox'])
-            ctx = await b.new_context(viewport={'width': 1920, 'height': 1080})
-            await ctx.add_cookies(cookies)
-            page = await ctx.new_page()
+            p = None
+            b = None
+            ctx = None
             try:
-                await asyncio.wait_for(
-                    page.goto('https://xyq.jianying.com/home', wait_until='domcontentloaded'),
-                    timeout=30
-                )
-            except asyncio.TimeoutError:
-                pass
-            await page.wait_for_timeout(5000)
-            credits = await get_credits_info(page)
-            await b.close()
-            await p.stop()
-            return credits
+                p = await async_playwright().start()
+                b = await p.chromium.launch(headless=True, args=['--no-sandbox'])
+                ctx = await b.new_context(viewport={'width': 1920, 'height': 1080})
+                await ctx.add_cookies(cookies)
+                page = await ctx.new_page()
+                try:
+                    await asyncio.wait_for(
+                        page.goto('https://xyq.jianying.com/home', wait_until='domcontentloaded'),
+                        timeout=30
+                    )
+                except asyncio.TimeoutError:
+                    pass
+                await page.wait_for_timeout(5000)
+                return await get_credits_info(page)
+            finally:
+                try:
+                    if ctx is not None:
+                        await ctx.close()
+                except Exception:
+                    pass
+                try:
+                    if b is not None:
+                        await b.close()
+                except Exception:
+                    pass
+                try:
+                    if p is not None:
+                        await p.stop()
+                except Exception:
+                    pass
 
         credits = asyncio.run(check_credits_async())
 
@@ -1664,23 +1681,40 @@ def check_all_cookies():
                 async def check_credits_async():
                     cookies = load_cookies(cookie_path)
                     from playwright.async_api import async_playwright
-                    p = await async_playwright().start()
-                    b = await p.chromium.launch(headless=True, args=['--no-sandbox'])
-                    ctx = await b.new_context(viewport={'width': 1920, 'height': 1080})
-                    await ctx.add_cookies(cookies)
-                    page = await ctx.new_page()
+                    p = None
+                    b = None
+                    ctx = None
                     try:
-                        await asyncio.wait_for(
-                            page.goto('https://xyq.jianying.com/home', wait_until='domcontentloaded'),
-                            timeout=30
-                        )
-                    except asyncio.TimeoutError:
-                        pass
-                    await page.wait_for_timeout(5000)
-                    credits = await get_credits_info(page)
-                    await b.close()
-                    await p.stop()
-                    return credits
+                        p = await async_playwright().start()
+                        b = await p.chromium.launch(headless=True, args=['--no-sandbox'])
+                        ctx = await b.new_context(viewport={'width': 1920, 'height': 1080})
+                        await ctx.add_cookies(cookies)
+                        page = await ctx.new_page()
+                        try:
+                            await asyncio.wait_for(
+                                page.goto('https://xyq.jianying.com/home', wait_until='domcontentloaded'),
+                                timeout=30
+                            )
+                        except asyncio.TimeoutError:
+                            pass
+                        await page.wait_for_timeout(5000)
+                        return await get_credits_info(page)
+                    finally:
+                        try:
+                            if ctx is not None:
+                                await ctx.close()
+                        except Exception:
+                            pass
+                        try:
+                            if b is not None:
+                                await b.close()
+                        except Exception:
+                            pass
+                        try:
+                            if p is not None:
+                                await p.stop()
+                        except Exception:
+                            pass
 
                 credits = asyncio.run(check_credits_async())
 

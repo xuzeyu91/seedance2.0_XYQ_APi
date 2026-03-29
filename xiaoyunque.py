@@ -482,10 +482,13 @@ async def run_with_cookie(prompt, duration, ratio, model, ref_images, output_dir
     log(f'[*] 使用 Cookie #{cookie_index + 1}: {os.path.basename(cookies_file)}')
     log(f'[*] 小云雀 - {prompt[:30]}... | {duration}s | {ratio} | {MODEL_LABELS.get(model, model)}')
 
-    p = await async_playwright().start()
-    b = await p.chromium.launch(headless=True, args=['--no-sandbox'])
+    p = None
+    b = None
+    ctx = None
 
     try:
+        p = await async_playwright().start()
+        b = await p.chromium.launch(headless=True, args=['--no-sandbox'])
         ctx = await b.new_context(viewport={'width': 1920, 'height': 1080})
         cookies = load_cookies(cookies_file)
         await ctx.add_cookies(cookies)
@@ -526,8 +529,6 @@ async def run_with_cookie(prompt, duration, ratio, model, ref_images, output_dir
         required_credits = MODEL_CREDITS_PER_SEC.get(model, 5) * duration
         if credits is not None and credits < required_credits:
             log(f'[*] 积分不足 ({credits} < {required_credits})，需要换用其他Cookie')
-            await b.close()
-            await p.stop()
             return 'INSUFFICIENT_CREDITS'
 
         if ref_images:
@@ -549,8 +550,6 @@ async def run_with_cookie(prompt, duration, ratio, model, ref_images, output_dir
         log(f'  文字: {"通过" if text_ok else "拒绝"} {text_detail}')
         if not text_ok:
             log('[ERROR] 文字安全审核未通过')
-            await b.close()
-            await p.stop()
             return build_error_result(
                 'text_security_check_failed',
                 format_rejection_message('文字安全审核未通过', text_detail),
@@ -563,8 +562,6 @@ async def run_with_cookie(prompt, duration, ratio, model, ref_images, output_dir
             log(f'  图片: {"通过" if img_ok else "拒绝"} {img_detail}')
             if not img_ok:
                 log('[ERROR] 图片安全审核未通过')
-                await b.close()
-                await p.stop()
                 return build_error_result(
                     'image_security_check_failed',
                     format_rejection_message('图片安全审核未通过', img_detail),
@@ -587,36 +584,46 @@ async def run_with_cookie(prompt, duration, ratio, model, ref_images, output_dir
             if download_video(mp4_url, out_path):
                 size_mb = os.path.getsize(out_path) / 1048576
                 log(f'[DONE] {out_path} ({size_mb:.1f}MB)')
-                await b.close()
-                await p.stop()
                 return out_path
             else:
                 log('[ERROR] 下载失败')
         else:
             log('[ERROR] 未获取到视频URL')
 
-        await b.close()
-        await p.stop()
         return None
 
     except Exception as e:
         traceback.print_exc()
         log(f'[FATAL] {e}')
-        try:
-            await b.close()
-            await p.stop()
-        except:
-            pass
         return None
+    finally:
+        try:
+            if ctx is not None:
+                await ctx.close()
+        except Exception:
+            pass
+        try:
+            if b is not None:
+                await b.close()
+        except Exception:
+            pass
+        try:
+            if p is not None:
+                await p.stop()
+        except Exception:
+            pass
 
 
 async def precheck_with_cookie(prompt, ref_images, cookie_index, cookies_file):
     log(f'[*] 预检 Cookie #{cookie_index + 1}: {os.path.basename(cookies_file)}')
 
-    p = await async_playwright().start()
-    b = await p.chromium.launch(headless=True, args=['--no-sandbox'])
+    p = None
+    b = None
+    ctx = None
 
     try:
+        p = await async_playwright().start()
+        b = await p.chromium.launch(headless=True, args=['--no-sandbox'])
         ctx = await b.new_context(viewport={'width': 1920, 'height': 1080})
         cookies = load_cookies(cookies_file)
         await ctx.add_cookies(cookies)
@@ -674,11 +681,18 @@ async def precheck_with_cookie(prompt, ref_images, cookie_index, cookies_file):
         return None
     finally:
         try:
-            await b.close()
+            if ctx is not None:
+                await ctx.close()
         except Exception:
             pass
         try:
-            await p.stop()
+            if b is not None:
+                await b.close()
+        except Exception:
+            pass
+        try:
+            if p is not None:
+                await p.stop()
         except Exception:
             pass
 
