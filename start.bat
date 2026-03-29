@@ -13,7 +13,9 @@ set "LOCAL_TEMP_DIR=%CD%\.cache\temp"
 set "PLAYWRIGHT_CACHE_DIR=%CD%\.cache\ms-playwright"
 if not defined PIP_INDEX_URL set "PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple"
 if not defined PIP_TRUSTED_HOST set "PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn"
-if not defined PLAYWRIGHT_DOWNLOAD_HOST set "PLAYWRIGHT_DOWNLOAD_HOST=https://registry.npmmirror.com/-/binary/playwright"
+if not defined PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST set "PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST=%PLAYWRIGHT_DOWNLOAD_HOST%"
+if not defined PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST set "PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/chrome-for-testing"
+if not defined PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT set "PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=300000"
 
 if not exist "%LOCAL_TEMP_DIR%" mkdir "%LOCAL_TEMP_DIR%"
 if not exist "%PLAYWRIGHT_CACHE_DIR%" mkdir "%PLAYWRIGHT_CACHE_DIR%"
@@ -56,12 +58,22 @@ if errorlevel 1 goto fail
 
 echo [4/5] 安装 Playwright Chromium...
 echo 使用 PyPI 镜像: %PIP_INDEX_URL%
-echo 使用 Playwright 镜像: %PLAYWRIGHT_DOWNLOAD_HOST%
+echo 使用 Playwright Chromium 镜像: %PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST%
 echo 使用临时目录: %TEMP%
 echo 使用浏览器缓存目录: %PLAYWRIGHT_BROWSERS_PATH%
+echo 下载超时(ms): %PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT%
+call "%PYTHON_EXE%" -m playwright install chromium
+if errorlevel 1 goto retry_playwright_official
+goto start_app
+
+:retry_playwright_official
+echo Playwright 国内镜像安装失败，正在切换到官方源重试...
+set "PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST="
+set "PLAYWRIGHT_DOWNLOAD_HOST="
 call "%PYTHON_EXE%" -m playwright install chromium
 if errorlevel 1 goto fail
 
+:start_app
 echo [5/5] 启动服务...
 echo 浏览器地址: %BROWSER_URL%
 start "" "%BROWSER_URL%"
